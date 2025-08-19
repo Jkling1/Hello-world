@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id      String   @id @default(cuid())
+  email   String   @unique
+  name    String?
+  image   String?
+  profile Profile?
+  missions Mission[]
+  hydrationLogs HydrationLog[]
+  metricLogs MetricLog[]
+  races Race[]
+  trainingPhases TrainingPhase[]
+  budgetPlans BudgetPlan[]
+  budgetTransactions BudgetTransaction[]
+  recipes Recipe[]
+  menuWeeks MenuWeek[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Profile {
+  userId      String  @id
+  displayName String
+  avatarUrl   String?
+  timezone    String  @default("UTC")
+  user        User    @relation(fields: [userId], references: [id])
+}
+
+enum MissionType {
+  PHYSICAL
+  FINANCIAL
+  MENTAL
+}
+
+model Mission {
+  id        String      @id @default(cuid())
+  userId    String
+  date      DateTime    @db.Date
+  title     String
+  type      MissionType
+  xp        Int         @default(50)
+  completed Boolean     @default(false)
+  user      User        @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+}
+
+model HydrationLog {
+  id       String   @id @default(cuid())
+  userId   String
+  date     DateTime @db.Date
+  amountMl Int
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+}
+
+model MetricLog {
+  id     String   @id @default(cuid())
+  userId String
+  date   DateTime @db.Date
+  kind   String
+  value  Float
+  user   User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date, kind])
+}
+
+model Race {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  date          DateTime @db.Date
+  location      String?
+  distanceLabel String
+  status        String    @default("UPCOMING")
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+}
+
+model TrainingPhase {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  order     Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, order])
+}
+
+model BudgetPlan {
+  id         String                 @id @default(cuid())
+  userId     String
+  slug       String
+  title      String
+  totalCents Int
+  user       User                   @relation(fields: [userId], references: [id])
+  categories BudgetPlanCategory[]
+
+  @@unique([userId, slug])
+}
+
+model BudgetPlanCategory {
+  id        String     @id @default(cuid())
+  planId    String
+  key       String
+  label     String
+  capCents  Int
+  plan      BudgetPlan @relation(fields: [planId], references: [id])
+
+  @@unique([planId, key])
+}
+
+model BudgetTransaction {
+  id          String   @id @default(cuid())
+  userId      String
+  date        DateTime @db.Date
+  label       String
+  amountCents Int
+  mappedKey   String?
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+}
+
+enum MealType {
+  BREAKFAST
+  LUNCH
+  DINNER
+}
+
+model Recipe {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  mealType    MealType
+  calories    Int
+  macros      Json
+  ingredients Json
+  instructions String
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, mealType])
+}
+
+model MenuWeek {
+  id        String    @id @default(cuid())
+  userId    String
+  startDate DateTime  @db.Date
+  user      User      @relation(fields: [userId], references: [id])
+  items     MenuItem[]
+
+  @@index([userId, startDate])
+  @@unique([userId, startDate])
+}
+
+model MenuItem {
+  id        String   @id @default(cuid())
+  weekId    String
+  dayIndex  Int
+  mealType  MealType
+  recipeId  String
+  week      MenuWeek @relation(fields: [weekId], references: [id])
+  recipe    Recipe   @relation(fields: [recipeId], references: [id])
+
+  @@unique([weekId, dayIndex, mealType])
+}
+
