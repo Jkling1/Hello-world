@@ -1,0 +1,126 @@
+// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String     @id @default(cuid())
+  email     String     @unique
+  name      String?
+  createdAt DateTime   @default(now())
+  progress  Progress[]
+  reviews   Review[]
+  attempts  Attempt[]
+}
+
+model Domain {
+  id        String     @id @default(cuid())
+  code      String     @unique // D1..D6
+  name      String
+  weightPct Int
+  subtopics Subtopic[]
+  questions Question[]
+  progress  Progress[]
+}
+
+model Subtopic {
+  id         String       @id @default(cuid())
+  domainId   String
+  domain     Domain       @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  title      String
+  summary    String
+  terms      Term[]
+  flashcards Flashcard[]
+  questions  Question[]
+}
+
+model Term {
+  id         String      @id @default(cuid())
+  term       String
+  definition String
+  subtopicId String?
+  subtopic   Subtopic?   @relation(fields: [subtopicId], references: [id], onDelete: SetNull)
+  tags       String      // JSON array stored as string
+  flashcards Flashcard[]
+}
+
+model Flashcard {
+  id         String    @id @default(cuid())
+  front      String
+  back       String
+  termId     String?
+  term       Term?     @relation(fields: [termId], references: [id], onDelete: SetNull)
+  subtopicId String?
+  subtopic   Subtopic? @relation(fields: [subtopicId], references: [id], onDelete: SetNull)
+  difficulty String    // "Easy" | "Moderate" | "Challenging"
+  reviews    Review[]
+}
+
+model Question {
+  id         String    @id @default(cuid())
+  stem       String
+  choices    String    // JSON array stored as string
+  answerIdx  Int
+  rationale  String
+  difficulty String
+  subtopicId String?
+  subtopic   Subtopic? @relation(fields: [subtopicId], references: [id], onDelete: SetNull)
+  domainId   String
+  domain     Domain    @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  tags       String    // JSON array stored as string
+}
+
+model ExamTemplate {
+  id            String    @id @default(cuid())
+  name          String
+  totalItems    Int       // default 120
+  unscoredItems Int       // default 20
+  timeLimitMin  Int       // 120
+  domainWeights String    // JSON stored as string {D1:15,D2:15,D3:16,D4:24,D5:20,D6:10}
+  attempts      Attempt[]
+}
+
+model Attempt {
+  id         String       @id @default(cuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  templateId String
+  template   ExamTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  startedAt  DateTime     @default(now())
+  finishedAt DateTime?
+  scored     Boolean      @default(false)
+  scorePct   Float?
+  responses  String       // JSON array [{qId, selectedIdx, isCorrect}]
+}
+
+model Progress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  domainId    String
+  domain      Domain   @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  mastery0to1 Float    @default(0)
+  lastSeen    DateTime @default(now())
+
+  @@unique([userId, domainId])
+}
+
+model Review {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flashcardId String
+  flashcard   Flashcard @relation(fields: [flashcardId], references: [id], onDelete: Cascade)
+  dueAt       DateTime
+  interval    Int       // days
+  ease        Float     // SM-2 ease factor
+  reps        Int
+  qualityLast Int       // 0-5
+
+  @@unique([userId, flashcardId])
+}

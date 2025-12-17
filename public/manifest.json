@@ -1,0 +1,41 @@
+{
+  "name": "CPT-7 Prep - NASM Study App",
+  "short_name": "CPT-7 Prep",
+  "description": "Comprehensive NASM CPT-7 exam preparation with flashcards, practice tests, and analytics",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["education", "health"],
+  "shortcuts": [
+    {
+      "name": "Flashcards",
+      "short_name": "Flashcards",
+      "description": "Study with spaced repetition",
+      "url": "/flashcards",
+      "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Practice Test",
+      "short_name": "Practice",
+      "description": "Take a practice exam",
+      "url": "/practice/new",
+      "icons": [{ "src": "/icon-192x192.png", "sizes": "192x192" }]
+    }
+  ]
+}
