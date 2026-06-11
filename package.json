@@ -1,0 +1,30 @@
+{
+  "name": "vantage",
+  "private": true,
+  "version": "1.0.0",
+  "description": "VANTAGE — Project IronMind. Personal operating system for the road to Ironman Florida.",
+  "workspaces": [
+    "packages/engine",
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w @vantage/server",
+    "dev:web": "npm run dev -w @vantage/web",
+    "build": "npm run build -w @vantage/web",
+    "start": "npm run build -w @vantage/web && npm run start -w @vantage/server",
+    "seed": "npm run seed -w @vantage/server",
+    "engine": "tsx packages/engine/src/cli.ts",
+    "test": "npm test -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

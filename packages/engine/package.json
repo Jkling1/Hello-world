@@ -1,0 +1,11 @@
+{
+  "name": "@vantage/engine",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Pure, testable training engine for Project IronMind",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  }
+}
