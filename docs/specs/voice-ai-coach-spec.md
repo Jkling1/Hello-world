@@ -1,220 +1,241 @@
-# Voice AI Coach — Product & Technical Specification
+# 🎙️ Voice AI Coach — Write-Capable Agent
 
-## 1. Overview & Goals
+**Spec v2 · Vantage / Project IronMind**
 
-The AI Coach is the conversational core of Vantage / Project IronMind. Today it
-answers questions and gives advice using the athlete's full context (profile,
-training phase, recent logs, journal, books, big rocks, long-term memory). That
-is necessary but not sufficient: an athlete talking to a coach out loud expects
-the coach to *act* on what they say, not just respond to it.
-
-This spec defines the Coach as a **write-capable agent**: a conversational
-interface backed by a function-calling layer that can create and modify the
-athlete's actual data — workouts, meals, daily metrics, plan adjustments, and
-checklist items — directly from natural speech, with every write confirmed,
-logged, and reversible.
-
-Non-goals: this spec does not cover authentication, multi-user support, or
-third-party integration writes (e.g. pushing workouts to Strava). Those are
-out of scope for v1.
-
-## 2. Personas & Core Scenarios
-
-Primary persona: a single athlete training for a fixed goal race, talking to
-the coach hands-free (post-workout, driving, cooking) or via text.
-
-Representative utterances this spec must support end-to-end:
-
-| Utterance | Expected effect |
+| | |
 |---|---|
-| "I did a 40-mile ride, felt good, HR in the 140s." | A workout is logged with distance, subjective feel, and HR range. |
-| "For breakfast I had oatmeal, a banana, and three eggs." | A meal is logged with estimated macros. |
-| "Slept six hours, feeling beat, mood's a 7." | Today's daily metrics (sleep, fatigue, mood) are recorded and feed the deload engine. |
-| "Swap tomorrow's run for a swim, knee's cranky." | Tomorrow's session is swapped via the training engine, with the reason noted. |
-| "Check off book race-week lodging." | The named checklist item is marked complete. |
+| **Status** | Draft — ready for build |
+| **Owner** | Jordan Kling |
+| **Scope** | Coach write path: function-calling tools, nutrition logging, audit + undo |
+| **Out of scope (v1)** | Auth, multi-user, third-party writes (Strava push), always-listening mode |
 
-## 3. Voice Interface
+---
 
-- **Input**: browser Web Speech API (or equivalent STT) for capture, streamed
-  to the Coach as text once an utterance is finalized. Provider is behind a
-  pluggable interface so a hosted STT (e.g. Whisper) can replace it without
-  touching the Coach logic.
-- **Output**: responses are spoken via TTS and shown as chat text
-  simultaneously, so the interaction works with the mic muted or with sound
-  off.
-- **Degradation**: unsupported browsers disable the mic with an inline
-  explanation; the rest of the Coach (text chat, writes) is unaffected.
-- **Turn-taking**: the interface is push-to-talk for v1 (not full-duplex);
-  continuous "always listening" mode is a future extension, not required
-  here.
+## 1. The one-liner
 
-## 4. Conversational Layer (Read Path)
+> **Talk to your coach and it does the work.** Say what happened — a ride, a meal, a rough night of sleep — and the Coach writes it into your real data: workouts, nutrition, daily metrics, the training plan, your checklists. Every write is confirmed out loud, logged to an audit trail, and undoable with one command.
 
-Unchanged from the existing Coach: every turn is built with the athlete's
-profile, current phase, recent logs, journal entries, book notes, big rocks,
-and long-term memory, then answered in plain language. This spec does not
-change the read path — it adds a write path alongside it.
-
-## 5. Data Model
-
-### 5.1 Existing entities referenced
-
-- `Workout` — session log (type, duration/distance, feel note, HR data).
-- `DailyMetrics` — per-day sleep, fatigue, mood, used by the deload/reset
-  triggers in the training engine.
-- `ChecklistItem` — a named, completable task (e.g. race-week logistics).
-- `Plan` / `Session` — the generated daily protocol the training engine
-  produces; sessions can be swapped or annotated.
-
-### 5.2 New entity: `NutritionLog`
-
-There was previously no place to persist food. This spec adds:
+Today's Coach is a great *listener*: it answers with your full context (profile, phase, recent logs, journal, books, memory). This spec upgrades it to a great *assistant* — a **write-capable agent**, not just a talking encyclopedia.
 
 ```
-NutritionLog {
+"I did a 40-mile ride, felt good, HR in the 140s."
+        │
+        ▼
+┌─────────────────────────────────────────────────┐
+│  COACH (agent loop)                             │
+│  intent → tool call → write → confirm → audit   │
+└─────────────────────────────────────────────────┘
+        │
+        ▼
+✅ "Logged it — 40-mile ride, feeling good, HR 140s.
+    That's your longest ride this block. Anything to add?"
+```
+
+---
+
+## 2. What you can say (core scenarios)
+
+Five utterance families define v1. Each one maps to exactly one tool in §7.
+
+| You say… | The Coach… | Tool |
+|---|---|---|
+| *"I did a 40-mile ride, felt good, HR in the 140s."* | Logs the workout with distance, feel, and HR range | `log_workout` |
+| *"For breakfast I had oatmeal, a banana, and three eggs."* | Logs the meal and estimates calories + macros | `log_meal` |
+| *"Slept six hours, feeling beat, mood's a 7."* | Records today's sleep/fatigue/mood → feeds the deload engine | `log_daily_metrics` |
+| *"Swap tomorrow's run for a swim, knee's cranky."* | Adjusts the plan *through the training engine*, reason attached | `adjust_plan` |
+| *"Check off book race-week lodging."* | Marks the matching checklist item complete | `toggle_checklist_item` |
+
+> [!NOTE]
+> **Persona:** one athlete, one goal race, often hands-free — post-workout, driving, cooking. Voice-first, but everything works identically over text.
+
+---
+
+## 3. Architecture at a glance
+
+```mermaid
+sequenceDiagram
+    actor A as Athlete
+    participant V as Voice I/O<br/>(STT / TTS)
+    participant C as Coach Agent
+    participant T as Tool Layer (§7)
+    participant D as Domain Data
+    participant X as CoachAction<br/>audit log
+
+    A->>V: "Slept six hours, feeling beat, mood's a 7"
+    V->>C: finalized transcript
+    C->>C: build context (profile, phase, logs, memory)
+    C->>T: log_daily_metrics {sleep: 6, fatigue: 8, mood: 7}
+    T->>D: upsert DailyMetrics (today)
+    T->>X: record CoachAction (applied)
+    D-->>C: deload trigger fired? → yes
+    C->>V: confirmation + heads-up
+    V->>A: 🔊 "Got it. Sleep 6h, fatigue high, mood 7.<br/>That trips your deload trigger —<br/>tomorrow's protocol just got lighter."
+```
+
+Design rule that falls out of this diagram: **the Coach never edits domain data directly.** It calls tools; tools write; every write leaves a `CoachAction` behind. One path in, one audit trail out.
+
+---
+
+## 4. Voice interface
+
+- **Input** — Web Speech API for capture; finalized utterances stream to the Coach as text. STT sits behind a pluggable provider interface, so hosted transcription (e.g. Whisper) is a drop-in swap with zero Coach changes.
+- **Output** — every response is simultaneously **spoken (TTS) and rendered as chat text**. Mic muted? Sound off? Nothing breaks.
+- **Turn-taking** — push-to-talk in v1. Full-duplex "always listening" is a future extension, deliberately not required here.
+- **Degradation** — unsupported browsers get a disabled mic with an inline explanation; text chat and the entire write path are unaffected.
+- **Mock mode** — with no API key, the deterministic mock coach still exercises the full tool loop (intent → write → confirm → audit), so the write path is testable keyless.
+
+---
+
+## 5. Data model
+
+### 5.1 Existing entities (referenced, unchanged)
+
+| Entity | Role in this spec |
+|---|---|
+| `Workout` | Target of `log_workout` — type, duration/distance, feel note, HR data |
+| `DailyMetrics` | Target of `log_daily_metrics` — the exact table the engine's deload/reset triggers read |
+| `Plan` / `Session` | Adjusted via `adjust_plan` — always through the training engine |
+| `ChecklistItem` | Target of `toggle_checklist_item` |
+
+### 5.2 New: `NutritionLog` 🍳
+
+Food had **nowhere to live** in the schema. This fixes that.
+
+```ts
+interface NutritionLog {
   id: string
-  loggedAt: datetime
-  rawText: string            // "oatmeal, a banana, and three eggs"
-  items: NutritionItem[]     // parsed items, one per food mentioned
-  estimatedCalories: number  // sum across items
-  estimatedMacros: { proteinG: number, carbsG: number, fatG: number }
+  loggedAt: string              // ISO datetime
+  meal: "breakfast" | "lunch" | "dinner" | "snack"   // stated, else inferred from time of day
+  rawText: string               // "oatmeal, a banana, and three eggs" — always preserved verbatim
+  items: NutritionItem[]
+  estimatedCalories: number     // sum of items
+  estimatedMacros: Macros
   source: "voice" | "text"
-  confidence: "estimated"    // always estimated, never claimed exact
 }
 
-NutritionItem {
+interface NutritionItem {
   name: string
-  quantity: string           // free-text quantity as spoken, e.g. "1 banana"
+  quantity: string              // as spoken: "1 banana", "three eggs"
   estimatedCalories: number
-  estimatedMacros: { proteinG: number, carbsG: number, fatG: number }
+  estimatedMacros: Macros
 }
+
+interface Macros { proteinG: number; carbsG: number; fatG: number }
 ```
 
-Macro/calorie estimates come from the Coach's model call (constrained JSON),
-not a nutrition database lookup, and are always labeled as estimates in the
-UI — no false precision.
+> [!IMPORTANT]
+> Estimates come from the model in the same constrained-JSON tool call — not a nutrition-database lookup. The UI **always labels them as estimates**. No false precision, ever.
 
-### 5.3 New entity: `CoachAction` (audit log)
+### 5.3 New: `CoachAction` — the audit log 🧾
 
-Every write the Coach makes is recorded, independent of the domain record it
-created or changed:
+Every write the Coach makes, in one place, forever:
 
-```
-CoachAction {
+```ts
+interface CoachAction {
   id: string
-  createdAt: datetime
-  tool: string               // e.g. "log_workout"
-  utterance: string           // the triggering user text
-  input: object                // arguments the model produced
-  result: "applied" | "undone" | "failed"
-  targetType: string           // "Workout" | "NutritionLog" | ...
+  createdAt: string
+  tool: string                  // "log_workout" | "log_meal" | ...
+  utterance: string             // the exact user text that triggered it
+  input: object                 // arguments the model produced
+  targetType: string            // "Workout" | "NutritionLog" | ...
   targetId: string
-  confirmationText: string     // what the Coach said back to the athlete
+  result: "applied" | "undone" | "failed"
+  confirmationText: string      // what the Coach said back
 }
 ```
 
-This is what makes "everything the Coach changed" inspectable and undoable —
-it is the single source of truth for the write path, separate from and in
-addition to the domain tables it touches.
+This table is the single source of truth for the write path. "Show me everything the Coach changed this week" is one query. Undo is one row-flip plus one revert.
 
-## 6. Safety Model
+---
 
-- **No silent writes.** Every tool call results in a spoken/written
-  confirmation before or immediately after the write ("Logged a 40-mile ride,
-  feeling good, HR 140s — anything to add?").
-- **Undo, not edit-in-place.** Reversing a Coach action deletes/reverts the
-  record and marks the `CoachAction` as `"undone"`; it does not silently
-  mutate history.
-- **Ambiguity → clarify, don't guess.** If a tool's required fields can't be
-  extracted confidently (e.g. "log a workout" with no detail), the Coach asks
-  a follow-up instead of calling the tool with placeholder data.
-- **Scope limits.** Tools only ever touch the current athlete's own records.
-  No tool exists for deleting historical data outright — only the specific
-  record just created via undo.
+## 6. Safety model
 
-## 7. Write-Capable Agent Tools (Function-Calling Layer)
+Four rules, no exceptions:
 
-The Coach is given a fixed set of tools it may call in response to a turn.
-The model chooses zero or one tool per turn (multiple distinct asks in one
-utterance may be handled as sequential tool calls within the same turn). Every
-tool call is followed by a plain-language confirmation and a `CoachAction`
-record.
+1. **🔊 No silent writes.** Every tool call produces a plain-language confirmation, spoken and written: *"Logged a 40-mile ride, feeling good, HR 140s — anything to add?"*
+2. **↩️ Undo, not edit-in-place.** *"Undo that"* reverts the domain record and flips the `CoachAction` to `"undone"`. History is never silently mutated.
+3. **🤔 Clarify, don't guess.** Missing required fields (*"log a workout"* — which one?) → the Coach asks a follow-up. It never fabricates placeholder data to force a tool call through.
+4. **🔒 Own data only.** Tools touch the current athlete's records exclusively. There is no bulk-delete tool; the only destructive operation is undoing a specific just-made action.
 
-### 7.1 `log_workout`
+---
 
-- **Triggers on**: descriptions of completed training sessions.
-- **Input**: session type, duration and/or distance, subjective feel, optional
-  HR range/avg, optional notes.
-- **Effect**: creates a `Workout` record for today (or the date mentioned).
-- **Confirmation**: restates type, distance/duration, and feel.
-- **Example**: *"I did a 40-mile ride, felt good, HR in the 140s"* → Workout
-  {type: ride, distance: 40mi, feel: good, hrRange: "140s"}.
+## 7. The tool layer (function-calling)
 
-### 7.2 `log_meal`
+The Coach gets a fixed toolset. Per turn it selects **zero or one** tool; a compound utterance (*"log the ride and check off lodging"*) is handled as sequential calls within the turn. Every successful call = exactly one write + one confirmation + one `CoachAction`.
 
-- **Triggers on**: descriptions of food eaten.
-- **Input**: free-text list of foods, meal label if stated (breakfast/lunch/
-  dinner/snack), otherwise inferred from time of day.
-- **Effect**: creates a `NutritionLog` (§5.2), with the model estimating
-  per-item and total calories/macros in the same tool call.
-- **Confirmation**: restates the items and the estimated total, flagged as an
-  estimate.
-- **Example**: *"For breakfast I had oatmeal, a banana, and three eggs"* →
-  NutritionLog with 3 items, breakfast, estimated ~550 kcal.
+### 7.1 `log_workout` 🚴
 
-### 7.3 `log_daily_metrics`
+| | |
+|---|---|
+| **Triggers on** | descriptions of completed training sessions |
+| **Input** | type · duration and/or distance · subjective feel · HR range/avg (opt) · notes (opt) · date (defaults today) |
+| **Writes** | one `Workout` |
+| **Confirms** | restates type, distance/duration, feel |
 
-- **Triggers on**: statements about sleep, fatigue/energy, or mood.
-- **Input**: any subset of {sleepHours, fatigue (1–10), mood (1–10)}, filling
-  only what was said — this tool must support partial updates.
-- **Effect**: upserts today's `DailyMetrics`, which is what the training
-  engine's deload/reset triggers read from directly. A metrics write here can
-  immediately change tomorrow's generated protocol.
-- **Confirmation**: restates what was recorded and, if a deload/reset trigger
-  fired as a result, says so explicitly.
-- **Example**: *"Slept six hours, feeling beat, mood's a 7"* →
-  DailyMetrics{sleepHours: 6, fatigue: 8 (inferred from "beat"), mood: 7}.
+*"I did a 40-mile ride, felt good, HR in the 140s"* → `{type: "ride", distanceMi: 40, feel: "good", hrRange: "140s"}`
 
-### 7.4 `adjust_plan`
+### 7.2 `log_meal` 🍳
 
-- **Triggers on**: requests to change an upcoming session or the reason
-  behind a change (injury, schedule conflict, etc.).
-- **Input**: target date (defaults to next matching session), replacement
-  session type or "skip", reason.
-- **Effect**: calls into the training engine to swap/annotate the session
-  rather than editing the plan directly, so injury-aware swap logic and
-  fueling recalculation stay consistent with engine-generated days.
-- **Confirmation**: restates the swap and the reason recorded.
-- **Example**: *"Swap tomorrow's run for a swim, knee's cranky"* → tomorrow's
-  session becomes a swim, reason: "knee".
+| | |
+|---|---|
+| **Triggers on** | descriptions of food eaten |
+| **Input** | free-text food list · meal label (stated, else inferred from clock) |
+| **Writes** | one `NutritionLog` (§5.2), items + macros estimated in the same call |
+| **Confirms** | restates items + estimated total, explicitly flagged as an estimate |
 
-### 7.5 `toggle_checklist_item`
+*"For breakfast I had oatmeal, a banana, and three eggs"* → 3 items, breakfast, ~550 kcal est.
 
-- **Triggers on**: marking a named task/checklist item done or not done.
-- **Input**: item name (fuzzy-matched against open `ChecklistItem`s), target
-  state (defaults to "complete").
-- **Effect**: toggles the matched `ChecklistItem`. If no confident match is
-  found, the Coach lists close candidates and asks which one, rather than
-  creating a new item or guessing.
-- **Confirmation**: restates the item and its new state.
-- **Example**: *"Check off book race-week lodging"* → ChecklistItem "Book
-  race-week lodging" → complete.
+### 7.3 `log_daily_metrics` 😴
+
+| | |
+|---|---|
+| **Triggers on** | statements about sleep, energy/fatigue, or mood |
+| **Input** | any subset of `{sleepHours, fatigue 1–10, mood 1–10}` — **partial updates required** |
+| **Writes** | upserts today's `DailyMetrics` — the exact table the engine's deload/reset triggers read; a write here can change tomorrow's protocol immediately |
+| **Confirms** | restates what was recorded — **and says so out loud if a deload/reset trigger fired** |
+
+*"Slept six hours, feeling beat, mood's a 7"* → `{sleepHours: 6, fatigue: 8 /* inferred from "beat" */, mood: 7}`
+
+### 7.4 `adjust_plan` 🔁
+
+| | |
+|---|---|
+| **Triggers on** | requests to change an upcoming session, or a reason forcing one (injury, schedule) |
+| **Input** | target date (defaults to next matching session) · replacement type or `"skip"` · reason |
+| **Writes** | calls **into the training engine** to swap/annotate — never a direct plan edit — so injury-aware swaps and fueling recalculation stay consistent |
+| **Confirms** | restates the swap and the recorded reason |
+
+*"Swap tomorrow's run for a swim, knee's cranky"* → tomorrow: swim, reason: `"knee"`.
+
+### 7.5 `toggle_checklist_item` ✅
+
+| | |
+|---|---|
+| **Triggers on** | marking a named task done / not done |
+| **Input** | item name (fuzzy-matched against open items) · target state (defaults complete) |
+| **Writes** | toggles the matched `ChecklistItem` |
+| **Confirms** | restates item + new state |
+
+*"Check off book race-week lodging"* → **Book race-week lodging** → ✅
+
+> [!WARNING]
+> No confident fuzzy match → the Coach lists the closest candidates and asks. It never creates a new item or toggles a guess.
+
+---
 
 ## 8. Definition of Done
 
-- [ ] `NutritionLog` and `CoachAction` entities exist in the schema with
-      migrations.
-- [ ] All five tools in §7 are implemented behind the function-calling layer
-      and covered by tests exercising the example utterance for each.
-- [ ] Every successful tool call produces exactly one `CoachAction` record
-      and one plain-language confirmation.
-- [ ] `log_daily_metrics` writes are visible to the training engine's
-      deload/reset trigger logic without requiring a separate sync step.
-- [ ] `adjust_plan` goes through the training engine (not a direct plan
-      edit), preserving injury-aware swap and fueling logic.
-- [ ] Ambiguous or underspecified utterances produce a clarifying question
-      instead of a tool call with guessed fields.
-- [ ] Every applied `CoachAction` can be undone, and undoing it updates the
-      `CoachAction.result` to `"undone"` and reverts the domain record.
-- [ ] Works in both voice and text input modes, and in both live-API and
-      keyless mock-coach modes.
+The feature ships when **every** box is checked:
+
+- [ ] `NutritionLog` and `CoachAction` exist in the schema, with migrations.
+- [ ] All five §7 tools implemented behind the function-calling layer, each with a test exercising its example utterance end-to-end.
+- [ ] Every successful tool call → exactly one `CoachAction` + one plain-language confirmation.
+- [ ] `log_daily_metrics` writes are visible to the deload/reset triggers with **no separate sync step**.
+- [ ] `adjust_plan` routes through the training engine — direct plan edits are impossible from the Coach.
+- [ ] Ambiguous utterances produce a clarifying question, never a guessed tool call.
+- [ ] Every applied `CoachAction` is undoable; undo reverts the domain record and marks the action `"undone"`.
+- [ ] Works across all four modes: **voice × text** input, **live-API × keyless mock** coach.
+
+---
+
+*Systems over goals · Consistency over intensity · The Coach that writes it down is the Coach you actually use.*
